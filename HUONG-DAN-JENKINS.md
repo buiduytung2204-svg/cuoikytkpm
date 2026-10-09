@@ -1,25 +1,33 @@
-# Jenkins cho dự án Giải đấu
+﻿# Jenkins cho dự án Giải đấu
 
-Pipeline hiện có ba bước: lấy mã nguồn từ Git, cài đúng dependency theo `package-lock.json`, rồi kiểm tra cú pháp Node.js/HTML, điều hướng mobile và các quy tắc không đưa tệp bí mật/database lên web. Kết quả build lưu lại `Jenkinsfile` và các tệp chính làm artifact.
+Jenkins đã được cài và cấu hình trên máy này. Job `giai-dau-ci` lấy mã từ repository Git cục bộ, đọc `Jenkinsfile`, chạy `npm ci`, kiểm tra ứng dụng bằng `npm run check`, rồi lưu các tệp chính thành artifact.
 
-## Yêu cầu
+## Chạy và nộp kết quả
 
-- Jenkins bản Windows hiện hành cần Java 21 trở lên.
-- Máy đã có Node.js và npm.
-- Tạo một repository Git cho bài tập. Không đưa `.env`, `.postgres-admin-password.txt`, `node_modules` hoặc file database SQLite vào repository.
+1. Mở `http://127.0.0.1:8081` trên chính máy đang chạy Jenkins.
+2. Đăng nhập bằng tài khoản và mật khẩu trong `D:\tkpm\.jenkins-home\jenkins-admin.txt`.
+3. Mở job `giai-dau-ci` rồi chọn **Build Now**.
+4. Khi build thành công, mở **Console Output** và **Last Successful Artifacts** để xem log và tải tệp. Có thể chụp ảnh các stage màu xanh và kết quả `SUCCESS` để nộp cho thầy.
 
-## Tạo Pipeline job
+Pipeline hiện kiểm tra cú pháp Node.js/HTML, điều hướng mobile, allow-list của static route và quy tắc loại trừ dữ liệu nhạy cảm. Pipeline chưa triển khai ứng dụng lên máy chủ.
 
-1. Cài Jenkins bằng bộ cài Windows chính thức và hoàn tất tài khoản quản trị ban đầu.
-2. Đưa mã nguồn cùng `Jenkinsfile` lên repository Git của bài tập.
-3. Trong Jenkins chọn **New Item → Pipeline**.
-4. Ở **Pipeline definition**, chọn **Pipeline script from SCM**, SCM **Git**, điền URL repository, branch và Script Path `Jenkinsfile`.
-5. Chọn **Build Now**. Build thành công khi các stage **Checkout**, **Install dependencies** và **Validate application** đều xanh.
-6. Mở **Console Output** và **Archived Artifacts** để chụp ảnh nộp bài.
+## Khởi động lại Jenkins sau khi tắt máy
 
-Jenkinsfile chưa tự triển khai ứng dụng. Web vẫn được chạy riêng bằng `npm start`; database và Cloudflare Tunnel cũng là các dịch vụ riêng. Nếu đề bài yêu cầu tự động triển khai, cần bổ sung đúng môi trường deploy mà thầy yêu cầu.
+Mở PowerShell và chạy:
 
-## Kiểm tra trên máy phát triển
+```powershell
+$env:JENKINS_HOME = 'D:\tkpm\.jenkins-home'
+$env:GIT_CONFIG_GLOBAL = 'D:\tkpm\.jenkins-home\gitconfig'
+& 'C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot\bin\java.exe' '-Dhudson.plugins.git.GitSCM.ALLOW_LOCAL_CHECKOUT=true' -jar "$env:TEMP\jenkins-2.580.1.war" --httpListenAddress=127.0.0.1 --httpPort=8081
+```
+
+Giữ cửa sổ PowerShell mở khi cần Jenkins. Jenkins chỉ lắng nghe trên `127.0.0.1`; các máy khác không thể đăng nhập vào Jenkins qua mạng.
+
+## Nếu thầy cần truy cập từ máy khác
+
+Repository và Jenkins hiện chỉ ở máy này. Để thầy tự chạy job, cần đẩy repository lên nơi thầy yêu cầu (ví dụ GitHub) hoặc dùng Jenkins do trường cấp. Không mở cổng Jenkins trực tiếp ra Internet và không dùng tunnel của ứng dụng web cho Jenkins; Jenkins có quyền chạy lệnh trên máy.
+
+## Kiểm tra thủ công
 
 ```powershell
 npm ci
