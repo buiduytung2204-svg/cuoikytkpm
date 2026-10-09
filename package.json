@@ -1,0 +1,17 @@
+{
+  "name": "giai-dau",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Ứng dụng quản lý giải đấu chạy bằng Node.js và PostgreSQL",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node scripts/validate.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "pg": "^8.13.1"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}

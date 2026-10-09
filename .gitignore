@@ -1,0 +1,9 @@
+.env
+.postgres-admin-password.txt
+.jenkins-home/
+node_modules/
+*.sqlite3
+*.log
+*.dump
+*.backup
+.postgres-admin-password.txt
