@@ -1,35 +1,40 @@
 ﻿# Jenkins cho dự án Giải đấu
 
-Jenkins đã được cài và cấu hình trên máy này. Job `giai-dau-ci` lấy mã từ repository Git cục bộ, đọc `Jenkinsfile`, chạy `npm ci`, kiểm tra ứng dụng bằng `npm run check`, rồi lưu các tệp chính thành artifact.
+## Cấu hình hiện tại
 
-## Chạy và nộp kết quả
+- Jenkins LTS 2.580.1 được cài bằng Windows Installer và chạy thành Windows service `Jenkins`.
+- Java 21 được dùng để chạy Jenkins.
+- Jenkins mở tại `http://127.0.0.1:8081` trên chính máy này.
+- Dữ liệu Jenkins, plugin, job và lịch sử build nằm trong `D:\tkpm\.jenkins-home`.
+- Service tự khởi động cùng Windows.
 
-1. Mở `http://127.0.0.1:8081` trên chính máy đang chạy Jenkins.
-2. Đăng nhập bằng tài khoản và mật khẩu trong `D:\tkpm\.jenkins-home\jenkins-admin.txt`.
-3. Mở job `giai-dau-ci` rồi chọn **Build Now**.
-4. Khi build thành công, mở **Console Output** và **Last Successful Artifacts** để xem log và tải tệp. Có thể chụp ảnh các stage màu xanh và kết quả `SUCCESS` để nộp cho thầy.
+## Chạy pipeline
 
-Pipeline hiện kiểm tra cú pháp Node.js/HTML, điều hướng mobile, allow-list của static route và quy tắc loại trừ dữ liệu nhạy cảm. Pipeline chưa triển khai ứng dụng lên máy chủ.
+1. Mở `http://127.0.0.1:8081`.
+2. Đăng nhập `admin`; mật khẩu được lưu trong `D:\tkpm\.jenkins-home\jenkins-admin.txt`.
+3. Mở job `giai-dau-ci`, chọn **Build Now**.
+4. Mở **Console Output** xem kết quả. Build thành công lưu các tệp chính trong **Last Successful Artifacts**.
 
-## Khởi động lại Jenkins sau khi tắt máy
+Build #9 đã chạy thành công dưới Windows service: `npm ci`, `npm run check` và lưu 6 artifact. Các kiểm tra bao gồm cú pháp Node/HTML, điều hướng mobile và quy tắc không đưa dữ liệu nhạy cảm lên web.
 
-Mở PowerShell và chạy:
+Job hiện copy source từ thư mục local `D:\tkpm` để chạy trên Windows service. `Jenkinsfile` đã có sẵn trong repository; sau khi repository GitHub được kết nối, chuyển job sang **Pipeline script from SCM** với nhánh `main` và đường dẫn `Jenkinsfile`.
 
-```powershell
-$env:JENKINS_HOME = 'D:\tkpm\.jenkins-home'
-$env:GIT_CONFIG_GLOBAL = 'D:\tkpm\.jenkins-home\gitconfig'
-& 'C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot\bin\java.exe' '-Dhudson.plugins.git.GitSCM.ALLOW_LOCAL_CHECKOUT=true' -jar "$env:TEMP\jenkins-2.580.1.war" --httpListenAddress=127.0.0.1 --httpPort=8081
-```
+## Quản lý Windows service
 
-Giữ cửa sổ PowerShell mở khi cần Jenkins. Jenkins chỉ lắng nghe trên `127.0.0.1`; các máy khác không thể đăng nhập vào Jenkins qua mạng.
-
-## Nếu thầy cần truy cập từ máy khác
-
-Repository và Jenkins hiện chỉ ở máy này. Để thầy tự chạy job, cần đẩy repository lên nơi thầy yêu cầu (ví dụ GitHub) hoặc dùng Jenkins do trường cấp. Không mở cổng Jenkins trực tiếp ra Internet và không dùng tunnel của ứng dụng web cho Jenkins; Jenkins có quyền chạy lệnh trên máy.
-
-## Kiểm tra thủ công
+Mở PowerShell bằng quyền phù hợp:
 
 ```powershell
-npm ci
-npm run check
+Get-Service Jenkins
+Start-Service Jenkins
+Stop-Service Jenkins
 ```
+
+## GitHub
+
+Repository local đã có nhánh `main` và commit pipeline. GitHub chưa được kết nối, vì vậy chưa có remote URL và chưa có mã nào được đẩy lên GitHub. Sau khi kết nối tài khoản, tạo repository, đẩy nhánh `main`, rồi đổi job `giai-dau-ci` sang repository GitHub.
+
+Không commit `.env`, `.postgres-admin-password.txt`, database SQLite hoặc `node_modules`; các đường dẫn này đã bị loại khỏi Git.
+
+## Giới hạn truy cập
+
+Jenkins chỉ lắng nghe trên `127.0.0.1`; máy khác không thể truy cập. Không mở Jenkins trực tiếp lên Internet hoặc qua tunnel của ứng dụng web. Nếu thầy cần xem build từ xa, dùng Jenkins của trường hoặc thống nhất cách cấp quyền truy cập repository.
