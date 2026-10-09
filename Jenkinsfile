@@ -1,34 +1,17 @@
-pipeline {
-    agent any
-
-    options {
-        timestamps()
-        disableConcurrentBuilds()
+node {
+    stage('Checkout') {
+        checkout scm
     }
 
-    stages {
-        stage('Checkout') {
-            steps {
-                checkout scm
-            }
-        }
-
-        stage('Install dependencies') {
-            steps {
-                bat 'npm ci'
-            }
-        }
-
-        stage('Validate application') {
-            steps {
-                bat 'npm run check'
-            }
-        }
+    stage('Install dependencies') {
+        bat 'npm ci'
     }
 
-    post {
-        always {
-            archiveArtifacts artifacts: 'Jenkinsfile,package.json,package-lock.json,server.js,giai-dau.html,scripts/validate.js', fingerprint: true, allowEmptyArchive: true
-        }
+    stage('Validate application') {
+        bat 'npm run check'
+    }
+
+    stage('Archive build files') {
+        archiveArtifacts artifacts: 'Jenkinsfile,package.json,package-lock.json,server.js,giai-dau.html,scripts/validate.js', fingerprint: true, allowEmptyArchive: true
     }
 }
