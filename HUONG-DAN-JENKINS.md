@@ -17,7 +17,7 @@
 
 Build #9 đã chạy thành công dưới Windows service: `npm ci`, `npm run check` và lưu 6 artifact. Các kiểm tra bao gồm cú pháp Node/HTML, điều hướng mobile và quy tắc không đưa dữ liệu nhạy cảm lên web.
 
-Job hiện copy source từ thư mục local `D:\tkpm` để chạy trên Windows service. `Jenkinsfile` đã có sẵn trong repository; sau khi repository GitHub được kết nối, chuyển job sang **Pipeline script from SCM** với nhánh `main` và đường dẫn `Jenkinsfile`.
+Job hiện copy source từ thư mục dự án local `D:\tkpm\cuoikytkpm-main` để chạy trên Windows service. `Jenkinsfile` đã có sẵn trong repository; sau khi repository GitHub được kết nối, chuyển job sang **Pipeline script from SCM** với nhánh `main` và đường dẫn `Jenkinsfile` (tính từ thư mục gốc repository).
 
 ## Quản lý Windows service
 

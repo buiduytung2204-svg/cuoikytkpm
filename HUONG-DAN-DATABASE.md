@@ -16,7 +16,7 @@ Giữ cổng PostgreSQL chỉ truy cập được từ máy này; tunnel chỉ t
 
 ## 2. Cài và chạy web
 
-Mở PowerShell tại `D:\tkpm`:
+Mở PowerShell tại thư mục dự án `D:\tkpm\cuoikytkpm-main` (thư mục chứa `package.json`):
 
 ```powershell
 Copy-Item .env.example .env
