@@ -8,6 +8,87 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+if (-not ('JenkinsProcessInspector' -as [type])) {
+  Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class JenkinsProcessInspector {
+  [StructLayout(LayoutKind.Sequential)]
+  public struct PROCESS_BASIC_INFORMATION {
+    public IntPtr Reserved1;
+    public IntPtr PebBaseAddress;
+    public IntPtr Reserved2_0;
+    public IntPtr Reserved2_1;
+    public IntPtr UniqueProcessId;
+    public IntPtr InheritedFromUniqueProcessId;
+  }
+  [DllImport("kernel32.dll", SetLastError = true)]
+  public static extern IntPtr OpenProcess(uint access, bool inherit, int processId);
+  [DllImport("ntdll.dll")]
+  public static extern int NtQueryInformationProcess(IntPtr process, int infoClass, out PROCESS_BASIC_INFORMATION info, int length, out int returned);
+  [DllImport("kernel32.dll", SetLastError = true)]
+  public static extern bool ReadProcessMemory(IntPtr process, IntPtr address, byte[] buffer, int size, out IntPtr read);
+  [DllImport("kernel32.dll")]
+  public static extern bool CloseHandle(IntPtr handle);
+}
+"@
+}
+
+function Get-ProcessWorkingDirectory([int]$ProcessId) {
+  $processHandle = [JenkinsProcessInspector]::OpenProcess(0x1010, $false, $ProcessId)
+  if ($processHandle -eq [IntPtr]::Zero) { return $null }
+  try {
+    $info = New-Object JenkinsProcessInspector+PROCESS_BASIC_INFORMATION
+    $returned = 0
+    $status = [JenkinsProcessInspector]::NtQueryInformationProcess(
+      $processHandle,
+      0,
+      [ref]$info,
+      [Runtime.InteropServices.Marshal]::SizeOf($info),
+      [ref]$returned
+    )
+    if ($status -ne 0) { return $null }
+
+    $pointerSize = [IntPtr]::Size
+    $parametersOffset = if ($pointerSize -eq 8) { 0x20 } else { 0x10 }
+    $currentDirectoryOffset = if ($pointerSize -eq 8) { 0x38 } else { 0x24 }
+    $pointerOffset = if ($pointerSize -eq 8) { 8 } else { 4 }
+
+    $bytesRead = [IntPtr]::Zero
+    $pointerBytes = New-Object byte[] $pointerSize
+    $pebParameters = [IntPtr]::Add($info.PebBaseAddress, $parametersOffset)
+    if (-not [JenkinsProcessInspector]::ReadProcessMemory($processHandle, $pebParameters, $pointerBytes, $pointerSize, [ref]$bytesRead)) { return $null }
+    if ($pointerSize -eq 8) {
+      $parameters = [IntPtr]([BitConverter]::ToInt64($pointerBytes, 0))
+    } else {
+      $parameters = [IntPtr]([BitConverter]::ToInt32($pointerBytes, 0))
+    }
+    if ($parameters -eq [IntPtr]::Zero) { return $null }
+
+    $descriptorSize = if ($pointerSize -eq 8) { 16 } else { 8 }
+    $descriptor = New-Object byte[] $descriptorSize
+    $descriptorAddress = [IntPtr]::Add($parameters, $currentDirectoryOffset)
+    if (-not [JenkinsProcessInspector]::ReadProcessMemory($processHandle, $descriptorAddress, $descriptor, $descriptorSize, [ref]$bytesRead)) { return $null }
+    $pathLength = [BitConverter]::ToUInt16($descriptor, 0)
+    if ($pathLength -lt 2 -or $pathLength -gt 16384) { return $null }
+
+    if ($pointerSize -eq 8) {
+      $pathAddress = [IntPtr]([BitConverter]::ToInt64($descriptor, $pointerOffset))
+    } else {
+      $pathAddress = [IntPtr]([BitConverter]::ToInt32($descriptor, $pointerOffset))
+    }
+    if ($pathAddress -eq [IntPtr]::Zero) { return $null }
+
+    $pathBytes = New-Object byte[] $pathLength
+    if (-not [JenkinsProcessInspector]::ReadProcessMemory($processHandle, $pathAddress, $pathBytes, $pathLength, [ref]$bytesRead)) { return $null }
+    return [Text.Encoding]::Unicode.GetString($pathBytes)
+  } catch {
+    return $null
+  } finally {
+    [void][JenkinsProcessInspector]::CloseHandle($processHandle)
+  }
+}
+
 $SourceDir = [System.IO.Path]::GetFullPath($SourceDir)
 $DeployDir = [System.IO.Path]::GetFullPath($DeployDir)
 $sourceFiles = @(
@@ -89,7 +170,16 @@ try {
     $ownerPid = [int]$listener.OwningProcess
     $owner = Get-CimInstance Win32_Process -Filter "ProcessId = $ownerPid" -ErrorAction SilentlyContinue
     $serverPattern = [regex]::Escape((Join-Path $DeployDir 'server.js'))
-    if (-not ($owner -and $owner.Name -eq 'node.exe' -and $owner.CommandLine -match $serverPattern)) {
+    $ownerMatchesScript = $owner -and $owner.Name -eq 'node.exe' -and $owner.CommandLine -match $serverPattern
+    if (-not $ownerMatchesScript -and $owner -and $owner.Name -eq 'node.exe' -and $owner.CommandLine -match '(?i)\bserver\.js(?:\s|$)') {
+      $workingDirectory = Get-ProcessWorkingDirectory -ProcessId $ownerPid
+      if ($workingDirectory) {
+        $ownerPath = [System.IO.Path]::GetFullPath($workingDirectory).TrimEnd([char[]]@('\', '/'))
+        $targetPath = [System.IO.Path]::GetFullPath($DeployDir).TrimEnd([char[]]@('\', '/'))
+        $ownerMatchesScript = [string]::Equals($ownerPath, $targetPath, [StringComparison]::OrdinalIgnoreCase)
+      }
+    }
+    if (-not $ownerMatchesScript) {
       throw 'Port 8000 is occupied by a process outside the configured deployment directory; it was left untouched.'
     }
     $oldServerPid = $ownerPid
