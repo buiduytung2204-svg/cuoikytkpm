@@ -752,7 +752,7 @@ res(){
   return head('Địa điểm & trọng tài',`<select data-c="rs">${SPORTS.map(s=>`<option${s.n===sn?' selected':''}>${s.n}</option>`).join('')}</select>`)+`<div class="two">${[['venues','Địa điểm','newVenue','delVenue'],['refs','Đội trọng tài','newRef','delRef']].map(([k,t,n,d])=>{const ls=S[k].filter(v=>v.sport===sn);return `<div class="card p0"><div class="ch">${t}${can('res')?b(n,'Thêm',sn,'sm'):''}</div>${ls.map(v=>`<div class="li"><div><b>${esc(v.name)}</b>${v.addr?`<div class="mut">${esc(v.addr)}</div>`:''}</div>${can('res')?x(d,v.id):''}</div>`).join('')||'<div class="li mut">Chưa có dữ liệu</div>'}</div>`}).join('')}</div>`;
 },
 users(){
-  return head('Tài khoản',b('newUser','Thêm tài khoản','','pri'))+`<div class="card p0 sc"><table><thead><tr><th>#</th><th>Họ tên</th><th>Tên đăng nhập</th><th>Vai trò</th><th>Phạm vi</th><th></th></tr></thead><tbody>${S.users.map((u,i)=>`<tr><td>${i+1}</td><td>${esc(u.name)}</td><td>${esc(u.username)}</td><td><select data-c="urole" data-id="${u.id}">${Object.keys(RL).map(k=>`<option value="${k}"${k===u.role?' selected':''}>${RL[k]}</option>`).join('')}</select></td><td>${esc(u.role==='btc'?S.tournaments.filter(t=>t.owner===u.id).map(t=>t.name).join(', '):u.role==='ath'?tn((S.teams.find(t=>t.id===(S.athletes.find(a=>a.id===u.athlete)||{}).team)||{}).id):u.role==='admin'?'Toàn hệ thống':u.role==='ref'?'Theo phân công':'Giải công khai')}</td><td>${u.id==='u1'?'':x('delUser',u.id)}</td></tr>`).join('')}</tbody></table></div>`;
+  return head('Tài khoản',b('newUser','Thêm tài khoản','','pri'))+`<div class="card p0 sc"><table><thead><tr><th>#</th><th>Họ tên</th><th>Tên đăng nhập</th><th>Vai trò</th><th>Phạm vi</th><th></th></tr></thead><tbody>${S.users.map((u,i)=>`<tr><td>${i+1}</td><td>${esc(u.name)}</td><td>${esc(u.username)}</td><td><select data-c="urole" data-id="${u.id}">${Object.keys(RL).map(k=>`<option value="${k}"${k===u.role?' selected':''}>${RL[k]}</option>`).join('')}</select></td><td>${esc(u.role==='btc'?S.tournaments.filter(t=>t.owner===u.id).map(t=>t.name).join(', '):u.role==='ath'?tn((S.teams.find(t=>t.id===(S.athletes.find(a=>a.id===u.athlete)||{}).team)||{}).id):u.role==='admin'?'Toàn hệ thống':u.role==='ref'?'Theo phân công':'Giải công khai')}</td><td>${u.id===S.userId?'':x('delUser',u.id)}</td></tr>`).join('')}</tbody></table></div>`;
 },
 stats(){
   if(!T())return empty();
@@ -1023,10 +1023,34 @@ const A={
   newUser:()=>form('Thêm tài khoản',[{k:'name',l:'Họ tên'},{k:'username',l:'Tên đăng nhập'},{k:'password',l:'Mật khẩu (tối thiểu 12 ký tự)',t:'password',min:12},{k:'role',l:'Vai trò',o:Object.keys(RL).map(k=>[k,RL[k]]),v:'view'},{k:'owner',l:'Giải đấu phụ trách (ban tổ chức)',o:[['','Chọn giải'],...S.tournaments.map(t=>[t.id,t.name])],r:false},{k:'athlete',l:'Vận động viên (mỗi người một tài khoản)',o:[['','Chọn vận động viên'],...S.athletes.map(a=>[a.id,a.name+' · '+tn((S.teams.find(t=>t.id===a.team)||{}).id)])],r:false}],v=>{if(S.users.some(u=>u.username===v.username))return 'Tên đăng nhập đã tồn tại';const u={id:uid(),name:v.name,username:v.username,password:v.password,role:v.role};if(v.role==='btc'&&v.owner){const t=S.tournaments.find(t=>t.id===v.owner);if(t)t.owner=u.id}if(v.role==='ath'){if(!v.athlete)return 'Hãy chọn hồ sơ vận động viên';if(S.users.some(x=>x.role==='ath'&&x.athlete===v.athlete))return 'Vận động viên này đã có tài khoản';u.athlete=v.athlete;u.name=(S.athletes.find(a=>a.id===v.athlete)||{}).name}S.users.push(u)}),
   delUser:id=>{S.users=S.users.filter(y=>y.id!==id)}
 };
+async function deleteUserAccount(id){
+  const target=S.users.find(user=>String(user.id)===String(id));
+  if(!target||!can('user')||!DB_READY)return;
+  if(String(id)===String(S.userId)){toast('Không thể xóa tài khoản đang đăng nhập.');return}
+  if(!confirm(`Xóa tài khoản “${target.username}”?`))return;
+  const ui={userId:S.userId,view:S.view,cur:S.cur,rs:S.rs,sel:S.sel};
+  const adopt=state=>{S={...state,...ui};DB_BASE=sharedState(state);DB_REVISION=state.revision||DB_REVISION;DB_CONFLICT=false;LOCAL_REVISION=0};
+  const latest=async()=>{
+    const response=await fetch('/api/state',{cache:'no-store'}),saved=await response.json();
+    if(!response.ok)throw new Error(saved.error||'Không tải được dữ liệu mới nhất.');
+    adopt(saved.state);DB_REVISION=saved.revision;
+  };
+  try{
+    if(dbSaveTimer){clearTimeout(dbSaveTimer);dbSaveTimer=0}
+    while(DB_SAVING)await new Promise(resolve=>setTimeout(resolve,40));
+    if(!DB_CONFLICT&&DB_BASE&&stableState(sharedState(S))!==stableState(DB_BASE))await syncState();
+    if(DB_CONFLICT)await latest();
+    const send=()=>fetch('/api/state',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({state:sharedState(S),baseState:DB_BASE,deleteUserId:String(id)}),cache:'no-store'});
+    let response=await send(),result=await response.json();
+    if(response.status===409){await latest();response=await send();result=await response.json()}
+    if(!response.ok)throw new Error(result.error||'Không xóa được tài khoản.');
+    adopt(result.state);DB_REVISION=result.revision;render(false);toast('Đã xóa tài khoản.');
+  }catch(error){toast(error.message||'Không xóa được tài khoản.')}
+}
 document.addEventListener('click',e=>{
   const el=e.target.closest('[data-a]');if(!el)return;
   if(el.dataset.a==='moreNav'){el.closest('.side').classList.toggle('more-open');return}
-  const fn=A[el.dataset.a];if(fn){const action=el.dataset.a,need=({newT:'t',delT:'t',editT:'t',newTeam:'team',editTeam:'team',delTeam:'team',newMember:'ath',newAth:'ath',editAth:'ath',delAth:'ath',addAthAccount:'user',draw:'draw',edit:'score',ev:'score',delEv:'score',newVenue:'res',delVenue:'res',newRef:'res',delRef:'res',newUser:'user',delUser:'user',rules:'t'})[action];if(!['logout','go','openT','selTeam'].includes(action)&&(!need||!can(need)))return;fn(el.dataset.id);render()}
+  const fn=A[el.dataset.a];if(fn){const action=el.dataset.a,need=({newT:'t',delT:'t',editT:'t',newTeam:'team',editTeam:'team',delTeam:'team',newMember:'ath',newAth:'ath',editAth:'ath',delAth:'ath',addAthAccount:'user',draw:'draw',edit:'score',ev:'score',delEv:'score',newVenue:'res',delVenue:'res',newRef:'res',delRef:'res',newUser:'user',delUser:'user',rules:'t'})[action];if(!['logout','go','openT','selTeam'].includes(action)&&(!need||!can(need)))return;if(action==='delUser'){deleteUserAccount(el.dataset.id);return}fn(el.dataset.id);render()}
 });
 document.addEventListener('change',e=>{
   const el=e.target.closest('[data-c]');if(!el)return;
