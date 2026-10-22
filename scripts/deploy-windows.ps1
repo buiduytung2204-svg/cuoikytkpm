@@ -114,6 +114,70 @@ if (-not (Test-Path -LiteralPath (Join-Path $DeployDir '.env') -PathType Leaf)) 
 
 $node = Get-Command node.exe -ErrorAction Stop
 $npm = Get-Command npm.cmd -ErrorAction Stop
+$serverTaskName = 'GiaiDauServer'
+$serverAccount = (Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).UserName
+if (-not $serverAccount) {
+  throw 'An interactive Windows user must be signed in so the app server and ngrok client use the same account.'
+}
+
+function Start-ApplicationServerTask {
+  $serverPath = Join-Path $DeployDir 'server.js'
+  $expectedUser = $serverAccount.Substring($serverAccount.LastIndexOf('\') + 1)
+  $task = Get-ScheduledTask -TaskName $serverTaskName -ErrorAction SilentlyContinue
+  $matchesTask = $false
+  if ($task -and $task.Actions.Count -eq 1) {
+    $action = $task.Actions[0]
+    $taskUser = [string]$task.Principal.UserId
+    $taskUser = $taskUser.Substring($taskUser.LastIndexOf('\') + 1)
+    $matchesTask = $taskUser -ieq $expectedUser -and
+      $action.Execute -ieq $node.Source -and
+      $action.Arguments -eq ('"' + $serverPath + '"') -and
+      [string]::Equals([System.IO.Path]::GetFullPath($action.WorkingDirectory), [System.IO.Path]::GetFullPath($DeployDir), [StringComparison]::OrdinalIgnoreCase)
+  }
+
+  if (-not $matchesTask) {
+    $action = New-ScheduledTaskAction -Execute $node.Source -Argument ('"' + $serverPath + '"') -WorkingDirectory $DeployDir
+    $principal = New-ScheduledTaskPrincipal -UserId $serverAccount -LogonType Interactive -RunLevel Limited
+    $settings = New-ScheduledTaskSettingsSet -Hidden -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
+    Register-ScheduledTask -TaskName $serverTaskName -Action $action -Principal $principal -Settings $settings -Description 'Run the tournament server under the signed-in user so the desktop control client can manage it.' -Force -ErrorAction Stop | Out-Null
+    $task = Get-ScheduledTask -TaskName $serverTaskName -ErrorAction Stop
+  }
+
+  if ($task.State -eq 'Running') {
+    Stop-ScheduledTask -TaskName $serverTaskName -ErrorAction Stop
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+      Start-Sleep -Milliseconds 250
+      $task = Get-ScheduledTask -TaskName $serverTaskName -ErrorAction Stop
+      if ($task.State -ne 'Running') { break }
+    }
+  }
+
+  Start-ScheduledTask -TaskName $serverTaskName -ErrorAction Stop
+  $serverPattern = [regex]::Escape($serverPath)
+  for ($attempt = 0; $attempt -lt 40; $attempt++) {
+    Start-Sleep -Milliseconds 500
+    try {
+      $request = [System.Net.HttpWebRequest]::Create('http://127.0.0.1:8000/api/bootstrap-status')
+      $request.Timeout = 1000
+      $request.Proxy = $null
+      $response = $request.GetResponse()
+      $healthy = [int]$response.StatusCode -eq 200
+      $response.Close()
+      if (-not $healthy) { continue }
+
+      $listener = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+      if (-not $listener) { continue }
+      $process = Get-CimInstance Win32_Process -Filter "ProcessId = $([int]$listener.OwningProcess)" -ErrorAction SilentlyContinue
+      if (-not ($process -and $process.Name -eq 'node.exe' -and $process.CommandLine -match $serverPattern)) { continue }
+
+      $owner = Invoke-CimMethod -InputObject $process -MethodName GetOwner -ErrorAction Stop
+      $actualAccount = if ($owner.ReturnValue -eq 0) { "$($owner.Domain)\$($owner.User)" } else { '' }
+      if ($actualAccount -ieq $serverAccount) { return [int]$listener.OwningProcess }
+    } catch { }
+  }
+
+  throw "The scheduled app server for $serverAccount did not pass its local health and process-identity checks."
+}
 $clientDir = Join-Path $DeployDir '.server-client'
 $stateFile = Join-Path $clientDir 'processes.json'
 $stdoutLog = Join-Path $clientDir 'server.out.log'
@@ -136,7 +200,8 @@ New-Item -ItemType Directory -Path $stagingDir, $backupDir -Force | Out-Null
 $oldServerPid = 0
 $oldNgrokPid = 0
 $oldServerStopped = $false
-$newServer = $null
+$newServerPid = 0
+$serverTaskStarted = $false
 $installedFiles = @()
 
 try {
@@ -221,46 +286,25 @@ try {
   Move-Item -LiteralPath (Join-Path $stagingDir 'node_modules') -Destination (Join-Path $DeployDir 'node_modules')
 
   New-Item -ItemType Directory -Path $clientDir -Force | Out-Null
-  $serverPath = Join-Path $DeployDir 'server.js'
-  $newServer = Start-Process -FilePath $node.Source `
-    -ArgumentList @('"' + $serverPath + '"') `
-    -WorkingDirectory $DeployDir `
-    -WindowStyle Hidden -PassThru `
-    -RedirectStandardOutput $stdoutLog `
-    -RedirectStandardError $stderrLog
-
-  $healthy = $false
-  for ($attempt = 0; $attempt -lt 40; $attempt++) {
-    Start-Sleep -Milliseconds 500
-    if ($newServer.HasExited) { break }
-    try {
-      $request = [System.Net.HttpWebRequest]::Create('http://127.0.0.1:8000/api/bootstrap-status')
-      $request.Timeout = 1000
-      $request.Proxy = $null
-      $response = $request.GetResponse()
-      $healthy = [int]$response.StatusCode -eq 200
-      $response.Close()
-      if ($healthy) { break }
-    } catch { }
-  }
-
-  if (-not $healthy) {
-    $details = if (Test-Path -LiteralPath $stderrLog) {
-      (Get-Content -LiteralPath $stderrLog -Tail 20) -join "`n"
-    } else { '' }
-    throw "The deployed server did not pass its local health check.`n$details"
-  }
+  $serverTaskStarted = $true
+  $newServerPid = Start-ApplicationServerTask
 
   [pscustomobject]@{
-    serverPid = $newServer.Id
+    serverPid = $newServerPid
     ngrokPid = $oldNgrokPid
   } | ConvertTo-Json | Set-Content -LiteralPath $stateFile -Encoding UTF8
 
   $deploymentCommitted = $true
-  Write-Output "Deployment succeeded. Server PID: $($newServer.Id). Existing .env and ngrok process were preserved."
+  Write-Output "Deployment succeeded. Server PID: $newServerPid. Existing .env and ngrok process were preserved."
 } catch {
-  if ($newServer -and -not $newServer.HasExited) {
-    Stop-Process -Id $newServer.Id -Force -ErrorAction SilentlyContinue
+  if ($newServerPid -gt 0) {
+    Stop-Process -Id $newServerPid -Force -ErrorAction SilentlyContinue
+  }
+  if ($serverTaskStarted) {
+    try {
+      $task = Get-ScheduledTask -TaskName $serverTaskName -ErrorAction SilentlyContinue
+      if ($task -and $task.State -eq 'Running') { Stop-ScheduledTask -TaskName $serverTaskName -ErrorAction SilentlyContinue }
+    } catch { }
   }
 
   foreach ($relativePath in $installedFiles) {
@@ -284,13 +328,8 @@ try {
 
   if ($oldServerStopped) {
     try {
-      $recoveredServer = Start-Process -FilePath $node.Source `
-        -ArgumentList @('"' + (Join-Path $DeployDir 'server.js') + '"') `
-        -WorkingDirectory $DeployDir `
-        -WindowStyle Hidden -PassThru `
-        -RedirectStandardOutput $stdoutLog `
-        -RedirectStandardError $stderrLog
-      [pscustomobject]@{ serverPid = $recoveredServer.Id; ngrokPid = $oldNgrokPid } |
+      $recoveredServerPid = Start-ApplicationServerTask
+      [pscustomobject]@{ serverPid = $recoveredServerPid; ngrokPid = $oldNgrokPid } |
         ConvertTo-Json | Set-Content -LiteralPath $stateFile -Encoding UTF8
     } catch { }
   }
