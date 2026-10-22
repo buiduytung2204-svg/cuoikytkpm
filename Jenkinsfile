@@ -25,7 +25,7 @@ node {
 
     if (branchName == 'main') {
         stage('Deploy to Windows host') {
-            withEnv(["DEPLOY_DIR=${deployDir}"]) {
+            withEnv(["DEPLOY_DIR=${deployDir}", "JENKINS_NODE_COOKIE=dontKillMe"]) {
                 bat 'powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts\\deploy-windows.ps1 -SourceDir "%WORKSPACE%" -DeployDir "%DEPLOY_DIR%"'
             }
         }
