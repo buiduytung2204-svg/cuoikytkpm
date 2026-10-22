@@ -354,15 +354,40 @@ const server = http.createServer(async (req, res) => {
       saved.user = { id: session.userId, username: session.username, role: session.role, athlete: me.rows[0]?.athlete_id, team: me.rows[0]?.team_id };
       return json(res, 200, saved);
     }
+    if (url.pathname === '/api/users/delete' && req.method === 'POST') {
+      if (!(await refreshSession(session))) return json(res, 401, { error: 'Vui lòng đăng nhập.' });
+      if (session.mustChange) return json(res, 403, { error: 'Đổi mật khẩu trước khi tiếp tục.' });
+      if (session.role !== 'admin') return json(res, 403, { error: 'Chỉ quản trị viên được xóa tài khoản.' });
+      const input = await readBody(req), userId = String(input.id || '');
+      if (!userId) return json(res, 400, { error: 'Thiếu tài khoản cần xóa.' });
+      if (userId === session.userId) return json(res, 400, { error: 'Không thể xóa tài khoản đang đăng nhập.' });
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query('LOCK TABLE app_entities, accounts IN SHARE ROW EXCLUSIVE MODE');
+        const target = await client.query('SELECT id,role FROM accounts WHERE id=$1 FOR UPDATE', [userId]);
+        const entity = await client.query("SELECT 1 FROM app_entities WHERE collection='users' AND item_id=$1", [userId]);
+        if (!target.rowCount && !entity.rowCount) throw Object.assign(new Error('Tài khoản không còn tồn tại.'), { status: 404 });
+        if (target.rows[0]?.role === 'admin') {
+          const admins = await client.query("SELECT COUNT(*)::int AS count FROM accounts WHERE role='admin'");
+          if (admins.rows[0].count <= 1) throw Object.assign(new Error('Phải giữ lại ít nhất một tài khoản quản trị viên.'), { status: 400 });
+        }
+        await client.query("DELETE FROM app_entities WHERE collection='users' AND item_id=$1", [userId]);
+        await client.query('DELETE FROM accounts WHERE id=$1', [userId]);
+        await client.query('UPDATE app_meta SET revision=revision+1 WHERE id=1');
+        const saved = await readState(client);
+        await client.query('COMMIT');
+        saved.state.userId = session.userId;
+        return json(res, 200, { ok: true, state: saved.state, revision: saved.revision });
+      } catch (error) { await client.query('ROLLBACK'); throw error; }
+      finally { client.release(); }
+    }
     if (url.pathname === '/api/state' && req.method === 'PUT') {
       if (!(await refreshSession(session))) return json(res, 401, { error: 'Vui lòng đăng nhập.' });
       if (session.mustChange) return json(res, 403, { error: 'Đổi mật khẩu trước khi tiếp tục.' });
       const input = await readBody(req);
       if (!input.state || !input.baseState) return json(res, 400, { error: 'Thiếu dữ liệu nền để đồng bộ.' });
       validateState(input.state);validateState(input.baseState);
-      const deleteUserId = input.deleteUserId == null ? '' : String(input.deleteUserId);
-      if (deleteUserId && session.role !== 'admin') return json(res, 403, { error: 'Chỉ quản trị viên được xóa tài khoản.' });
-      if (deleteUserId && deleteUserId === session.userId) return json(res, 400, { error: 'Không thể xóa tài khoản đang đăng nhập.' });
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
@@ -370,25 +395,9 @@ const server = http.createServer(async (req, res) => {
         const latest = latestSnapshot.state;
         const base = publicState(input.baseState);
         const incoming = structuredClone(input.state);
-        // An explicit admin deletion is intentional: ignore stale edits to this
-        // account, while conflict-checking every other row as usual.
-        if (deleteUserId) {
-          base.users = base.users.filter(user => String(user.id) !== deleteUserId);
-          incoming.users = incoming.users.filter(user => String(user.id) !== deleteUserId);
-        }
         // Non-admin clients never submit account changes, even if their browser state was altered.
         if (session.role !== 'admin') incoming.users = base.users;
         const { merged, edits } = mergeState(base, incoming, latest);
-        if (deleteUserId) {
-          const target = latest.users.find(user => String(user.id) === deleteUserId);
-          if (target) {
-            if (target.role === 'admin' && latest.users.filter(user => user.role === 'admin').length <= 1) {
-              throw Object.assign(new Error('Phải giữ lại ít nhất một tài khoản quản trị viên.'), { status: 400 });
-            }
-            merged.users = merged.users.filter(user => String(user.id) !== deleteUserId);
-            edits.users.push({ id: deleteUserId, before: target, after: undefined });
-          }
-        }
         assertCanEdit(session, edits, latest, incoming);
         if (edits.users.length && session.role !== 'admin') throw Object.assign(new Error('Chỉ quản trị viên được quản lý tài khoản.'), { status: 403 });
         for (const key of collections) for (const change of edits[key]) {
