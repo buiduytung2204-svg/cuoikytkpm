@@ -23,8 +23,12 @@ Trong Jenkins, cấu hình job dạng **Pipeline script from SCM**:
 
 Không bật thêm polling trong giao diện; lịch polling 5 phút đã nằm trong Jenkinsfile. Mỗi lần `main` thay đổi, Jenkins sẽ tự build và deploy sau khi các bước kiểm tra thành công. Nhánh khác chỉ chạy CI.
 
-## Trạng thái Jenkins trên máy
+## Khởi tạo Jenkins lần đầu
 
-Lần kiểm tra gần nhất, Windows service `Jenkins` đang dừng và được cấu hình chạy `D:\Jenkins\jenkins.exe`; đường dẫn đó không khả dụng trong môi trường hiện tại, nên chưa thể bật job hoặc chạy deploy từ đây. Cần khôi phục Jenkins tại đường dẫn cấu hình hoặc cài Jenkins lại, rồi trỏ job `giai-dau-ci` tới SCM ở trên. Jenkins cần chạy bằng tài khoản có quyền đọc/ghi thư mục đích và quyền chạy Node.js/npm. Service hiện khai báo `LocalSystem`, tài khoản này có quyền hệ thống trên thư mục ứng dụng đã phát hiện.
+Jenkins 2.580.1 đã được cài lại vào `C:\Jenkins`; service `Jenkins` chạy tự động trên cổng `8081`. Bản cài cũ trỏ tới ổ `D:` không còn khả dụng, nên đây là Jenkins home mới và lịch sử build/job cũ không có trong bản cài này.
+
+Mở `http://127.0.0.1:8081`, nhập mật khẩu khởi tạo từ `C:\ProgramData\Jenkins\.jenkins\secrets\initialAdminPassword`, cài các plugin được đề xuất và tạo tài khoản quản trị. Sau đó tạo/cấu hình job `giai-dau-ci` theo mục GitHub phía trên. Jenkins cần quyền chạy Node.js/npm và đọc/ghi thư mục deploy; service hiện chạy dưới `LocalSystem`.
+
+Jenkins chỉ nên lắng nghe trên `127.0.0.1`; không đưa trang Jenkins lên tunnel ngrok. `.env` không nằm trong Git và tuyệt đối không được thêm vào artifact.
 
 Jenkins chỉ nên lắng nghe trên `127.0.0.1`; không đưa trang Jenkins lên tunnel ngrok. `.env` không nằm trong Git và tuyệt đối không được thêm vào artifact.
