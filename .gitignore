@@ -6,3 +6,4 @@ node_modules/
 *.dump
 *.backup
 .postgres-admin-password.txt
+.server-client/

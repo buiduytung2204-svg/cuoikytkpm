@@ -902,8 +902,9 @@ function render(persist=true){
 function toast(m){const e=document.createElement('div');e.className='toast';e.textContent=m;document.body.appendChild(e);setTimeout(()=>e.remove(),2000)}
 function form(title,fs,ok){
   const m=document.createElement('div');m.className='ov';
-  m.innerHTML=`<div class="mod"><h3>${title}</h3>${fs.map(q=>`<label>${esc(q.l)}${q.o?`<select name="${q.k}">${q.o.map(o=>`<option value="${esc(o[0])}"${o[0]==q.v?' selected':''}>${esc(o[1])}</option>`).join('')}</select>`:`<input name="${q.k}" type="${q.t||'text'}" value="${esc(q.v??'')}"${q.r===false?'':' required'}${q.min!=null?` min="${q.min}"`:''}>`}</label>`).join('')}
+  m.innerHTML=`<div class="mod"><h3>${title}</h3>${fs.map(q=>`<label>${esc(q.l)}${q.o?`<select name="${q.k}">${q.o.map(o=>`<option value="${esc(o[0])}"${o[0]==q.v?' selected':''}>${esc(o[1])}</option>`).join('')}</select>`:`<input name="${q.k}" type="${q.t||'text'}" value="${esc(q.v??'')}"${q.digits?' inputmode="numeric" pattern="[0-9]*"':''}${q.r===false?'':' required'}${q.min!=null?` min="${q.min}"`:''}>`}</label>`).join('')}
   <div class="ft"><button class="btn" data-x>Hủy</button><button class="btn pri" data-ok>Lưu</button></div></div>`;
+  fs.filter(q=>q.digits).forEach(q=>{const input=m.querySelector(`[name="${q.k}"]`);input.addEventListener('input',()=>{input.value=input.value.replace(/[^0-9]/g,'')})});
   m.onclick=e=>{
     if(e.target===m||e.target.hasAttribute('data-x'))m.remove();
     if(e.target.hasAttribute('data-ok')){
@@ -989,10 +990,10 @@ const A={
   },
   edit:id=>{
     const m=S.matches.find(y=>y.id===id);
-    const fs=[{k:'sh',l:tn(m.home),t:'number',min:0,r:false,v:m.sh??''},{k:'sa',l:tn(m.away),t:'number',min:0,r:false,v:m.sa??''}];
+    const fs=[{k:'sh',l:tn(m.home),digits:true,min:0,r:false,v:m.sh??''},{k:'sa',l:tn(m.away),digits:true,min:0,r:false,v:m.sa??''}];
     if(can('draw'))fs.push({k:'time',l:'Thời gian',t:'datetime-local',v:m.time},{k:'venue',l:'Địa điểm',o:S.venues.filter(v=>v.sport===T().sport).map(v=>[v.id,v.name]),v:m.venue},{k:'ref',l:'Trọng tài',o:S.refs.filter(r=>r.sport===T().sport).map(r=>[r.id,r.name]),v:m.ref});
     form('Kết quả trận đấu',fs,v=>{
-      const ok=v.sh!==''&&v.sa!=='';if(ok&&+v.sh===+v.sa&&(!sp(T()).d||KO(T())||m.br))return 'Kết quả không thể hòa';m.sh=ok?+v.sh:null;m.sa=ok?+v.sa:null;
+      const ok=v.sh!==''&&v.sa!=='';if(ok&&(!Number.isSafeInteger(Number(v.sh))||!Number.isSafeInteger(Number(v.sa))))return 'Tỉ số phải là số nguyên hợp lệ';if(ok&&+v.sh===+v.sa&&(!sp(T()).d||KO(T())||m.br))return 'Kết quả không thể hòa';m.sh=ok?Number(v.sh):null;m.sa=ok?Number(v.sa):null;
       if(v.time){m.time=v.time;m.venue=v.venue;m.ref=v.ref}
     });
   },

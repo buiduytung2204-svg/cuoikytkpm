@@ -159,10 +159,39 @@ function sessionFor(req) {
 }
 async function refreshSession(session) {
   if (!session) return false;
-  const result = await pool.query('SELECT username,role,must_change FROM accounts WHERE id=$1', [session.userId]);
+  const result = await pool.query('SELECT username,role,must_change,athlete_id,team_id FROM accounts WHERE id=$1', [session.userId]);
   if (!result.rowCount) return false;
-  Object.assign(session, { username: result.rows[0].username, role: result.rows[0].role, mustChange: result.rows[0].must_change });
+  Object.assign(session, { username: result.rows[0].username, role: result.rows[0].role, mustChange: result.rows[0].must_change, athleteId: result.rows[0].athlete_id, teamId: result.rows[0].team_id });
   return true;
+}
+function scopedState(source, session) {
+  const state = publicState(source);
+  if (session.role === 'admin') return state;
+  let tournamentIds = new Set();
+  if (session.role === 'btc') tournamentIds = new Set(state.tournaments.filter(t => t.owner === session.userId).map(t => t.id));
+  else if (session.role === 'ath') {
+    const athlete = state.athletes.find(a => a.id === session.athleteId);
+    const team = state.teams.find(t => t.id === (athlete?.team || session.teamId));
+    if (team) tournamentIds.add(team.tid);
+  } else if (session.role === 'ref') tournamentIds = new Set(state.matches.filter(m => m.refUser === session.userId).map(m => m.tid));
+  else tournamentIds = new Set(state.tournaments.filter(t => t.public !== false).map(t => t.id));
+
+  state.tournaments = state.tournaments.filter(t => tournamentIds.has(t.id));
+  state.teams = state.teams.filter(t => tournamentIds.has(t.tid));
+  const teamIds = new Set(state.teams.map(t => t.id));
+  state.athletes = state.athletes.filter(a => tournamentIds.has(a.tid) || teamIds.has(a.team));
+  state.matches = state.matches.filter(m => tournamentIds.has(m.tid) && (session.role !== 'ref' || m.refUser === session.userId));
+  const matchIds = new Set(state.matches.map(m => m.id));
+  state.events = state.events.filter(e => matchIds.has(e.m));
+  const venueIds = new Set(state.matches.map(m => m.venue).filter(Boolean));
+  const refIds = new Set(state.matches.map(m => m.ref).filter(Boolean));
+  if (session.role !== 'btc') {
+    state.venues = state.venues.filter(v => venueIds.has(v.id));
+    state.refs = state.refs.filter(r => refIds.has(r.id));
+  }
+  const athleteIds = new Set(state.athletes.map(a => a.id));
+  state.users = state.users.filter(u => u.id === session.userId || (session.role === 'btc' && u.role === 'ath' && athleteIds.has(u.athlete)));
+  return state;
 }
 function safeCookie(req, token, maxAge) {
   const secure = req.headers['x-forwarded-proto'] === 'https';
@@ -221,6 +250,12 @@ function mergeState(base, incoming, latest) {
   return { merged: publicState(merged), edits };
 }
 function assertCanEdit(session, edits, latest, incoming) {
+  for (const row of edits.matches) if (row.after) {
+    const { sh, sa } = row.after;
+    if ((sh != null && (!Number.isSafeInteger(sh) || sh < 0)) || (sa != null && (!Number.isSafeInteger(sa) || sa < 0)) || ((sh == null) !== (sa == null))) {
+      throw Object.assign(new Error('Tỉ số phải gồm hai số nguyên không âm.'), { status: 400 });
+    }
+  }
   const role = session.role;
   if (role === 'admin') return;
   if (role === 'btc') {
@@ -229,7 +264,7 @@ function assertCanEdit(session, edits, latest, incoming) {
     for (const row of edits.tournaments) if ((row.before && !owned.has(row.before.id)) || (row.after && row.after.owner !== session.userId)) throw Object.assign(new Error('Bạn chỉ được sửa giải do mình phụ trách.'), { status: 403 });
     const tournamentId = item => item?.tid || (item && latest.teams.find(t => t.id === item.team)?.tid) || (item && latest.matches.find(m => m.id === item.m)?.tid);
     for (const key of ['teams', 'athletes', 'matches', 'events']) for (const row of edits[key]) {
-      if (!owned.has(tournamentId(row.before || row.after))) throw Object.assign(new Error('Bạn chỉ được sửa dữ liệu giải do mình phụ trách.'), { status: 403 });
+      if ((row.before && !owned.has(tournamentId(row.before))) || (row.after && !owned.has(tournamentId(row.after)))) throw Object.assign(new Error('Bạn chỉ được sửa dữ liệu giải do mình phụ trách.'), { status: 403 });
     }
     return;
   }
@@ -239,9 +274,10 @@ function assertCanEdit(session, edits, latest, incoming) {
     for (const row of edits.matches) {
       if (!assigned.has(row.id) || !row.before || !row.after) throw Object.assign(new Error('Bạn chỉ được cập nhật trận được phân công.'), { status: 403 });
       const allowed = new Set(['sh', 'sa']);
-      if (Object.keys(row.after).some(k => !allowed.has(k) && JSON.stringify(row.before[k]) !== JSON.stringify(row.after[k]))) throw Object.assign(new Error('Trọng tài chỉ được cập nhật tỷ số.'), { status: 403 });
+      const keys = new Set([...Object.keys(row.before), ...Object.keys(row.after)]);
+      if ([...keys].some(k => !allowed.has(k) && !same(row.before[k], row.after[k]))) throw Object.assign(new Error('Trọng tài chỉ được cập nhật tỷ số.'), { status: 403 });
     }
-    for (const row of edits.events) if (!assigned.has((row.after || row.before || {}).m)) throw Object.assign(new Error('Bạn chỉ được sửa sự kiện trong trận được phân công.'), { status: 403 });
+    for (const row of edits.events) if ((row.before && !assigned.has(row.before.m)) || (row.after && !assigned.has(row.after.m))) throw Object.assign(new Error('Bạn chỉ được sửa sự kiện trong trận được phân công.'), { status: 403 });
     return;
   }
   if (Object.values(edits).some(rows => rows.length)) throw Object.assign(new Error('Tài khoản này chỉ có quyền xem.'), { status: 403 });
@@ -325,10 +361,10 @@ const server = http.createServer(async (req, res) => {
       loginAttempts.delete(ip);
       const token = crypto.randomBytes(32).toString('hex');
       const user = { id: account.id, username: account.username, role: account.role };
-      sessions.set(token, { userId: account.id, username: account.username, role: account.role, mustChange: account.must_change, expires: Date.now() + 7 * 86400_000 });
+      sessions.set(token, { userId: account.id, username: account.username, role: account.role, mustChange: account.must_change, athleteId: account.athlete_id, teamId: account.team_id, expires: Date.now() + 7 * 86400_000 });
       if (account.must_change) return json(res, 200, { user, mustChange: true }, { 'Set-Cookie': safeCookie(req, token, 7 * 86400) });
       const saved = await readState();
-      return json(res, 200, { user, state: saved?.state, revision: saved?.revision, mustChange: false }, { 'Set-Cookie': safeCookie(req, token, 7 * 86400) });
+      return json(res, 200, { user, state: saved ? scopedState(saved.state, sessions.get(token)) : undefined, revision: saved?.revision, mustChange: false }, { 'Set-Cookie': safeCookie(req, token, 7 * 86400) });
     }
     if (url.pathname === '/api/change-password' && req.method === 'POST') {
       if (!(await refreshSession(session))) return json(res, 401, { error: 'Vui lòng đăng nhập.' });
@@ -350,6 +386,7 @@ const server = http.createServer(async (req, res) => {
       const saved = await readState();
       if (!saved) return json(res, 503, { error: 'Database chưa có dữ liệu. Cần hoàn tất thiết lập ban đầu.' });
       const me = await pool.query('SELECT athlete_id,team_id FROM accounts WHERE id=$1', [session.userId]);
+      saved.state = scopedState(saved.state, session);
       saved.state.userId = session.userId;
       saved.user = { id: session.userId, username: session.username, role: session.role, athlete: me.rows[0]?.athlete_id, team: me.rows[0]?.team_id };
       return json(res, 200, saved);
@@ -416,6 +453,7 @@ const server = http.createServer(async (req, res) => {
         await client.query('UPDATE app_meta SET revision=revision+1 WHERE id=1');
         const saved = await readState(client);
         await client.query('COMMIT');
+        saved.state = scopedState(saved.state, session);
         saved.state.userId = session.userId;
         return json(res, 200, { ok: true, state: saved.state, revision: saved.revision, updatedAt: saved.updatedAt });
       } catch (error) { await client.query('ROLLBACK'); throw error; }
