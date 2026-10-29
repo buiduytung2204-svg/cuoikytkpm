@@ -1,51 +1,46 @@
 # Jenkins CI/CD cho dự án Giải đấu
 
-## Trạng thái hiện tại
+## Pipeline hiện tại
 
-- Jenkins LTS 2.580.1 chạy dưới Windows service `Jenkins` trên `http://127.0.0.1:8081`.
-- Jenkins Home: `C:\Windows\System32\config\systemprofile\AppData\Local\Jenkins\.jenkins`.
-- Job `giai-dau-ci` đã nối với GitHub và nhánh `main`; lần chạy thành công đầu tiên đã deploy ứng dụng.
-- Jenkins chỉ lắng nghe trên máy này. Không đưa Jenkins lên tunnel ngrok.
+`Jenkinsfile` chạy trên agent Linux và thực hiện:
 
-## Pipeline
+1. Checkout source từ SCM.
+2. Dùng image `node:22-alpine` để chạy `npm ci` và `npm run check`.
+3. Trên nhánh `main`, build image từ `Dockerfile`.
+4. Nếu có khai báo `DOCKERHUB_REPO`, đẩy image lên Docker Hub bằng credential Jenkins có ID `hubdocker`.
+5. Lưu các file build làm artifact của Jenkins.
 
-Job dùng **Pipeline script from SCM**:
+Nhánh khác chỉ chạy validate và lưu artifact. Pipeline không tự thay container app/database đang chạy để tránh ghi đè môi trường hiện tại.
 
-- Repository: `https://github.com/buiduytung2204-svg/cuoikytkpm.git`
-- Branch: `*/main`
-- Script path: `Jenkinsfile`
-- Poll SCM: mỗi 5 phút.
+## Yêu cầu cho Jenkins agent
 
-Khi `main` thay đổi, Jenkins checkout code, chạy `npm ci` và `npm run check`, lưu artifact, rồi deploy. Chỉ nhánh `main` được deploy.
+Pipeline dùng Docker Pipeline plugin và cần agent có Docker CLI cùng quyền kết nối Docker daemon. Jenkins container hiện tại chạy Linux; Jenkinsfile Windows cũ dùng `bat` và đường dẫn deploy trên một máy cụ thể nên đã được thay bằng pipeline tương thích Linux.
 
-## Đích deploy và tiến trình server
+Trong Jenkins, vào **Manage Jenkins → Plugins** và cài **Docker Pipeline** nếu chưa có. Đảm bảo agent được gán Docker daemon an toàn trước khi chạy job. Không bật Docker daemon TCP không mã hóa ra mạng công cộng.
 
-Ứng dụng được deploy vào:
+## Tạo job
 
-```text
-C:\Users\tungb\OneDrive\Tài liệu\cuoikytkpm-main\cuoikytkpm-main
-```
+1. Mở Jenkins tại `http://localhost:8081` và hoàn tất Setup Wizard.
+2. Tạo **Pipeline** job (hoặc Multibranch Pipeline nếu muốn build nhiều nhánh).
+3. Chọn **Pipeline script from SCM**, cấu hình Git repository của dự án, branch `*/main` và script path `Jenkinsfile`.
+4. Lưu job và chạy thử. Bản build đầu tiên có thể không push image nếu để `DOCKERHUB_REPO` trống.
 
-Script `scripts/deploy-windows.ps1` yêu cầu file `.env` đã tồn tại ở thư mục đích. Nó cài dependencies trong thư mục tạm, giữ nguyên `.env` và ngrok, thay các file ứng dụng, rồi kiểm tra `http://127.0.0.1:8000/api/bootstrap-status`. Nếu bước kiểm tra thất bại, script khôi phục các file và dependencies trước đó.
+## Đẩy image lên Docker Hub
 
-Jenkins khởi động app qua Windows Scheduled Task `GiaiDauServer` dưới tài khoản Windows đang đăng nhập. Cách này giữ quyền cho client quản lý server. Cần đăng nhập Windows khi pipeline deploy; sau deploy, client vẫn có thể bật/tắt server và ngrok.
+1. Tạo repository trên Docker Hub, ví dụ `ten-tai-khoan/giai-dau`.
+2. Trong Jenkins thêm credential kiểu **Username with password** (ưu tiên Docker Hub access token thay cho mật khẩu tài khoản) và đặt ID chính xác là `hubdocker`.
+3. Chạy build trên nhánh `main`, nhập `DOCKERHUB_REPO` theo dạng `ten-tai-khoan/giai-dau` và `IMAGE_TAG` mong muốn.
+4. Xem **Console Output** và kiểm tra repository trên Docker Hub.
 
-## Chạy hoặc xem build
+Không lưu username/token trong Jenkinsfile, mã nguồn hoặc file `.env` được commit.
 
-1. Mở `http://127.0.0.1:8081`.
-2. Chọn job `giai-dau-ci`.
-3. Dùng **Build Now** để chạy thủ công, hoặc mở **Console Output** để xem tiến trình.
+## Jenkins container local
 
-Windows service Jenkins có thể điều khiển trong PowerShell:
+Jenkins chạy tại `http://localhost:8081` trong container `giai-dau-jenkins`. Dữ liệu cấu hình nằm trong volume `giai_dau_jenkins_home`.
 
 ```powershell
-Get-Service Jenkins
-Start-Service Jenkins
-Stop-Service Jenkins
+docker logs -f giai-dau-jenkins
+docker restart giai-dau-jenkins
 ```
 
-## Lưu ý
-
-- Không commit `.env`, database hoặc thông tin bí mật.
-- Artifact không chứa `.env`.
-- Tunnel ngrok chỉ dùng cho web app ở cổng 8000, không dùng để công khai Jenkins.
+Compose của ứng dụng chạy riêng ở `http://localhost:8000`; Jenkins pipeline chưa tự deploy Compose.
