@@ -4,7 +4,6 @@ services:
     privileged: true
     environment:
       DOCKER_TLS_CERTDIR: /certs
-      DOCKER_TLS_SAN: dns:docker
     volumes:
       - docker-certs-client:/certs/client
       - docker-data:/var/lib/docker

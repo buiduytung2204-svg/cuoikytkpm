@@ -2,6 +2,9 @@ FROM docker:29.9.3-cli AS docker-cli
 
 FROM jenkins/jenkins:2.580.1-lts-jdk21
 USER root
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
+    && ln -s /usr/bin/git /usr/local/bin/git.exe \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
-RUN docker --version
+RUN git --version && docker --version && git.exe --version
 USER jenkins
