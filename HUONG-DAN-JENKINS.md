@@ -1,46 +1,35 @@
 # Jenkins CI/CD cho dự án Giải đấu
 
-## Pipeline hiện tại
+## Jenkins trên Docker
 
-`Jenkinsfile` chạy trên agent Linux và thực hiện:
-
-1. Checkout source từ SCM.
-2. Dùng image `node:22-alpine` để chạy `npm ci` và `npm run check`.
-3. Trên nhánh `main`, build image từ `Dockerfile`.
-4. Nếu có khai báo `DOCKERHUB_REPO`, đẩy image lên Docker Hub bằng credential Jenkins có ID `hubdocker`.
-5. Lưu các file build làm artifact của Jenkins.
-
-Nhánh khác chỉ chạy validate và lưu artifact. Pipeline không tự thay container app/database đang chạy để tránh ghi đè môi trường hiện tại.
-
-## Yêu cầu cho Jenkins agent
-
-Pipeline dùng Docker Pipeline plugin và cần agent có Docker CLI cùng quyền kết nối Docker daemon. Jenkins container hiện tại chạy Linux; Jenkinsfile Windows cũ dùng `bat` và đường dẫn deploy trên một máy cụ thể nên đã được thay bằng pipeline tương thích Linux.
-
-Trong Jenkins, vào **Manage Jenkins → Plugins** và cài **Docker Pipeline** nếu chưa có. Đảm bảo agent được gán Docker daemon an toàn trước khi chạy job. Không bật Docker daemon TCP không mã hóa ra mạng công cộng.
-
-## Tạo job
-
-1. Mở Jenkins tại `http://localhost:8081` và hoàn tất Setup Wizard.
-2. Tạo **Pipeline** job (hoặc Multibranch Pipeline nếu muốn build nhiều nhánh).
-3. Chọn **Pipeline script from SCM**, cấu hình Git repository của dự án, branch `*/main` và script path `Jenkinsfile`.
-4. Lưu job và chạy thử. Bản build đầu tiên có thể không push image nếu để `DOCKERHUB_REPO` trống.
-
-## Đẩy image lên Docker Hub
-
-1. Tạo repository trên Docker Hub, ví dụ `ten-tai-khoan/giai-dau`.
-2. Trong Jenkins thêm credential kiểu **Username with password** (ưu tiên Docker Hub access token thay cho mật khẩu tài khoản) và đặt ID chính xác là `hubdocker`.
-3. Chạy build trên nhánh `main`, nhập `DOCKERHUB_REPO` theo dạng `ten-tai-khoan/giai-dau` và `IMAGE_TAG` mong muốn.
-4. Xem **Console Output** và kiểm tra repository trên Docker Hub.
-
-Không lưu username/token trong Jenkinsfile, mã nguồn hoặc file `.env` được commit.
-
-## Jenkins container local
-
-Jenkins chạy tại `http://localhost:8081` trong container `giai-dau-jenkins`. Dữ liệu cấu hình nằm trong volume `giai_dau_jenkins_home`.
+Jenkins chạy bằng Docker Compose trên máy này tại http://localhost:8081. Cấu hình nằm trong docker-compose.jenkins.yml và Dockerfile.jenkins.
 
 ```powershell
-docker logs -f giai-dau-jenkins
-docker restart giai-dau-jenkins
+docker compose -p giai-dau-jenkins -f docker-compose.jenkins.yml up -d --build
+docker compose -p giai-dau-jenkins -f docker-compose.jenkins.yml ps
+docker compose -p giai-dau-jenkins -f docker-compose.jenkins.yml logs -f jenkins
 ```
 
-Compose của ứng dụng chạy riêng ở `http://localhost:8000`; Jenkins pipeline chưa tự deploy Compose.
+Dữ liệu Jenkins được lưu trong volume giai-dau-jenkins-home; workspace và Docker image cache cũng dùng volume riêng. Dừng hoặc khởi động lại container không xóa dữ liệu. Không dùng docker compose down -v vì lệnh đó xóa các volume dữ liệu.
+
+Jenkins chỉ bind vào 127.0.0.1, không công khai cổng ra mạng. Jenkins sử dụng Docker-in-Docker có TLS ở mạng nội bộ Compose để build image.
+
+## Pipeline
+
+Job giai-dau-ci lấy mã từ repository GitHub buiduytung2204-svg/cuoikytkpm, nhánh main, file Jenkinsfile. Jenkins kiểm tra GitHub mỗi phút và thực hiện:
+
+1. Checkout mã nguồn.
+2. Chạy npm ci và npm run check trong Node 22.
+3. Build Docker image trên nhánh main.
+4. Lưu build artifacts.
+5. Đẩy image lên Docker Hub nếu đã cấu hình DOCKERHUB_REPO và credential có ID hubdocker.
+
+Build lỗi sẽ được ghi trong Console Output của Jenkins.
+
+## Tài khoản Jenkins
+
+Thông tin đăng nhập quản trị nằm trong file cục bộ C:\Users\tungb\.jenkins-home\jenkins-admin.txt. File này không được đưa vào Git. Không commit mật khẩu, API token hoặc Docker Hub access token.
+
+## Jenkins Windows service cũ
+
+Windows service Jenkins cũ đã được giữ lại nhưng dừng để tránh trùng cổng với container. Bản sao an toàn của Jenkins home nằm tại C:\JenkinsMigration\home; dữ liệu đang hoạt động được chuyển vào volume Docker giai-dau-jenkins-home.

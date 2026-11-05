@@ -1,0 +1,49 @@
+services:
+  docker:
+    image: docker:29.9.3-dind
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: /certs
+      DOCKER_TLS_SAN: dns:docker
+    volumes:
+      - docker-certs-client:/certs/client
+      - docker-data:/var/lib/docker
+      - jenkins-workspace:/var/jenkins_home/workspace
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "docker", "info"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  jenkins:
+    build:
+      context: .
+      dockerfile: Dockerfile.jenkins
+    image: giai-dau-jenkins:2.580.1
+    depends_on:
+      docker:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${JENKINS_HOST_PORT:-8081}:8080"
+    environment:
+      DOCKER_HOST: tcp://docker:2376
+      DOCKER_CERT_PATH: /certs/client
+      DOCKER_TLS_VERIFY: "1"
+      JAVA_OPTS: "-Xms256m -Xmx768m"
+    volumes:
+      - jenkins-home:/var/jenkins_home
+      - jenkins-workspace:/var/jenkins_home/workspace
+      - docker-certs-client:/certs/client:ro
+    restart: unless-stopped
+
+volumes:
+  jenkins-home:
+    name: giai-dau-jenkins-home
+  jenkins-workspace:
+    name: giai-dau-jenkins-workspace
+  docker-certs-client:
+    name: giai-dau-jenkins-docker-certs
+  docker-data:
+    name: giai-dau-jenkins-docker-data

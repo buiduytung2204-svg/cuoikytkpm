@@ -1,0 +1,7 @@
+FROM docker:29.9.3-cli AS docker-cli
+
+FROM jenkins/jenkins:2.580.1-lts-jdk21
+USER root
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+RUN docker --version
+USER jenkins
