@@ -1,4 +1,4 @@
-﻿param(
+param(
   [Parameter(Mandatory = $true)]
   [string]$SourceDir,
 
@@ -15,6 +15,13 @@ if (-not [string]::Equals($DeployDir.TrimEnd('\\'), $expectedDeployDir, [StringC
 }
 
 $docker = (Get-Command docker.exe -ErrorAction Stop).Source
+# Jenkins itself uses an isolated DinD daemon. Force the Windows agent onto Docker Desktop's Linux engine.
+Remove-Item Env:DOCKER_HOST, Env:DOCKER_TLS_VERIFY, Env:DOCKER_CERT_PATH -ErrorAction SilentlyContinue
+$env:DOCKER_CONTEXT = 'desktop-linux'
+$context = & $docker context show 2>&1
+if ($LASTEXITCODE -ne 0 -or $context.Trim() -ne 'desktop-linux') {
+  throw "Docker Desktop Linux context is unavailable to the deployment agent: $context"
+}
 $composeFile = Join-Path $DeployDir 'compose.yaml'
 $envFile = Join-Path $DeployDir '.env.docker'
 $containerName = 'cuoikytkpm-git-app-1'
