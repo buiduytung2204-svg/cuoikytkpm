@@ -33,3 +33,14 @@ Thông tin đăng nhập quản trị nằm trong file cục bộ C:\Users\tungb
 ## Jenkins Windows service cũ
 
 Windows service Jenkins cũ đã được giữ lại nhưng dừng để tránh trùng cổng với container. Bản sao an toàn của Jenkins home nằm tại C:\JenkinsMigration\home; dữ liệu đang hoạt động được chuyển vào volume Docker giai-dau-jenkins-home.
+- kakakakakakaka
+
+## Continuous deployment to Docker Desktop
+
+Jenkins polls `main` every minute. After a commit reaches GitHub, the pipeline validates the app, builds the CI image, then uses the online `windows-docker` agent to deploy the app through the host Docker Desktop engine. Open Jenkins at `http://localhost:8081`, select `giai-dau-ci`, and follow the build stages and Console Output.
+
+The Windows agent starts at user logon through the scheduled task `Jenkins Windows Docker Agent`. Docker Desktop must be running and the user must be signed in for deployment to work. The agent uses the local Docker CLI; the Jenkins DinD daemon is not used for deployment.
+
+The deploy stage is restricted to `main`. It deploys application files from the checked-out commit into `C:\Users\tungb\cuoikytkpm-git`, where the existing Compose project and private `.env.docker` live. It rebuilds and recreates only the `app` service, waits for its health check, and keeps the PostgreSQL service and named volume untouched. If the new app fails its health check, the stage restores the previous app image and files.
+
+To make a deployment, commit and push changes to `main`. A manual build can be started from Jenkins with **Build Now**; choose the main branch job. For other computers, update the deploy directory in `Jenkinsfile` and `scripts/deploy-docker-windows.ps1`, then configure a connected Windows agent with the label `windows-docker`.
