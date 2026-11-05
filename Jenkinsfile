@@ -28,12 +28,8 @@ pipeline {
 
         stage('Validate application') {
             steps {
-                script {
-                    docker.image('node:22-alpine').inside {
-                        sh 'npm ci'
-                        sh 'npm run check'
-                    }
-                }
+                bat 'npm ci'
+                bat 'npm run check'
             }
         }
 
