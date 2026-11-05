@@ -18,7 +18,7 @@ $docker = (Get-Command docker.exe -ErrorAction Stop).Source
 # Jenkins itself uses an isolated DinD daemon. Force the Windows agent onto Docker Desktop's Linux engine.
 Remove-Item Env:DOCKER_HOST, Env:DOCKER_TLS_VERIFY, Env:DOCKER_CERT_PATH -ErrorAction SilentlyContinue
 $env:DOCKER_CONTEXT = 'desktop-linux'
-$context = & $docker context show 2>&1
+$context = & $docker --context desktop-linux context show 2>&1
 if ($LASTEXITCODE -ne 0 -or $context.Trim() -ne 'desktop-linux') {
   throw "Docker Desktop Linux context is unavailable to the deployment agent: $context"
 }
@@ -40,13 +40,13 @@ foreach ($relative in $relativeFiles) {
 }
 
 $composeProject = 'cuoikytkpm-git'
-$composeArgs = @('compose', '-p', $composeProject, '-f', $composeFile)
-$dockerInfo = & $docker info --format '{{.ServerVersion}}' 2>&1
+$composeArgs = @('--context', 'desktop-linux', 'compose', '-p', $composeProject, '-f', $composeFile)
+$dockerInfo = & $docker --context desktop-linux info --format '{{.ServerVersion}}' 2>&1
 if ($LASTEXITCODE -ne 0) { throw "Docker Desktop is unavailable: $dockerInfo" }
 
-$oldImageId = (& $docker image inspect $imageName --format '{{.Id}}' 2>$null | Select-Object -First 1)
+$oldImageId = (& $docker --context desktop-linux image inspect $imageName --format '{{.Id}}' 2>$null | Select-Object -First 1)
 if ($LASTEXITCODE -ne 0 -or -not $oldImageId) {
-  $oldImageId = (& $docker inspect $containerName --format '{{.Image}}' 2>$null | Select-Object -First 1)
+  $oldImageId = (& $docker --context desktop-linux inspect $containerName --format '{{.Image}}' 2>$null | Select-Object -First 1)
 }
 if ($LASTEXITCODE -ne 0 -or -not $oldImageId) {
   throw "Could not find the currently running app image for rollback safety: $containerName"
@@ -73,7 +73,7 @@ try {
     $copied += $relative
   }
 
-  & $docker image tag $oldImageId $rollbackTag
+  & $docker --context desktop-linux image tag $oldImageId $rollbackTag
   if ($LASTEXITCODE -ne 0) { throw 'Could not preserve the currently running app image for rollback.' }
 
   & $docker @composeArgs build app
@@ -95,10 +95,11 @@ try {
       $response.Close()
       if ($healthy) { break }
     } catch { }
-    $state = & $docker inspect $containerName --format '{{.State.Status}}' 2>$null
+    $state = & $docker --context desktop-linux inspect $containerName --format '{{.State.Status}}' 2>$null
     if ($LASTEXITCODE -eq 0 -and $state.Trim() -eq 'exited') { break }
-  }  if (-not $healthy) {
-    $tail = & $docker logs --tail 30 $containerName 2>&1
+  }
+  if (-not $healthy) {
+    $tail = & $docker --context desktop-linux logs --tail 30 $containerName 2>&1
     throw "New app container failed its health check.`n$tail"
   }
 
@@ -106,7 +107,7 @@ try {
 } catch {
   $failure = $_
   if ($deploymentStarted) {
-    & $docker image tag $rollbackTag $imageName 2>$null | Out-Null
+    & $docker --context desktop-linux image tag $rollbackTag $imageName 2>$null | Out-Null
     & $docker @composeArgs up -d --no-deps app 2>&1 | Out-Null
   }
   foreach ($relative in $copied) {
