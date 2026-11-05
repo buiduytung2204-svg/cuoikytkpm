@@ -71,9 +71,22 @@ pipeline {
             }
         }
 
+        stage('Deploy to Docker Desktop') {
+            when {
+                expression { isMainBranch() }
+            }
+            agent {
+                label 'windows-docker'
+            }
+            steps {
+                checkout scm
+                bat 'powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts\\deploy-docker-windows.ps1 -SourceDir "%WORKSPACE%" -DeployDir "C:\\Users\\tungb\\cuoikytkpm-git"'
+            }
+        }
+
         stage('Archive build files') {
             steps {
-                archiveArtifacts artifacts: 'Jenkinsfile,package.json,package-lock.json,server.js,giai-dau.html,scripts/validate.js,Dockerfile,.dockerignore', fingerprint: true
+                archiveArtifacts artifacts: 'Jenkinsfile,package.json,package-lock.json,server.js,giai-dau.html,scripts/validate.js,Dockerfile,.dockerignore,scripts/deploy-docker-windows.ps1', fingerprint: true
             }
         }
     }
