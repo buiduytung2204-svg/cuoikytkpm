@@ -58,7 +58,7 @@ $backupDir = Join-Path $DeployDir ".ci-deploy\$deployId\backup"
 New-Item -ItemType Directory -Path $stageDir, $backupDir -Force | Out-Null
 $copied = @()
 $deploymentStarted = $false
-$rollbackTag = "${imageName}:rollback-$deployId"
+$rollbackTag = "${imageName}:rollback"
 
 try {
   foreach ($relative in $relativeFiles) {
@@ -118,7 +118,6 @@ try {
   }
   throw $failure
 } finally {
-  & $docker image rm $rollbackTag 2>$null | Out-Null
   $workDir = Split-Path -Parent $stageDir
   if (Test-Path -LiteralPath $workDir) {
     Remove-Item -LiteralPath $workDir -Recurse -Force -ErrorAction SilentlyContinue
