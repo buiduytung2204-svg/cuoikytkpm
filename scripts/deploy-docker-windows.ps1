@@ -44,9 +44,17 @@ $composeArgs = @('--context', 'desktop-linux', 'compose', '-p', $composeProject,
 $dockerInfo = & $docker --context desktop-linux info --format '{{.ServerVersion}}' 2>&1
 if ($LASTEXITCODE -ne 0) { throw "Docker Desktop is unavailable: $dockerInfo" }
 
-$oldImageId = (& $docker --context desktop-linux image inspect $imageName --format '{{.Id}}' 2>$null | Select-Object -First 1)
-if ($LASTEXITCODE -ne 0 -or -not $oldImageId) {
-  $oldImageId = (& $docker --context desktop-linux inspect $containerName --format '{{.Image}}' 2>$null | Select-Object -First 1)
+$imageOutput = @(& $docker --context desktop-linux image inspect $imageName --format '{{.Id}}' 2>$null)
+$imageExitCode = $LASTEXITCODE
+$oldImageId = if ($imageOutput.Count -gt 0) { $imageOutput[0] } else { $null }
+if ($imageExitCode -ne 0 -or -not $oldImageId) {
+  $containerImageOutput = @(& $docker --context desktop-linux inspect $containerName --format '{{.Image}}' 2>$null)
+  $containerExitCode = $LASTEXITCODE
+  $oldImageId = if ($containerImageOutput.Count -gt 0) { $containerImageOutput[0] } else { $null }
+  if ($containerExitCode -ne 0) { $oldImageId = $null }
+}
+if (-not $oldImageId) {
+  throw "Could not find the currently running app image for rollback safety: $containerName"
 }
 if ($LASTEXITCODE -ne 0 -or -not $oldImageId) {
   throw "Could not find the currently running app image for rollback safety: $containerName"
