@@ -86,15 +86,18 @@ try {
   $healthy = $false
   for ($attempt = 0; $attempt -lt 60; $attempt++) {
     Start-Sleep -Seconds 2
-    $status = & $docker inspect $containerName --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>$null
-    if ($LASTEXITCODE -eq 0 -and $status.Trim() -eq 'healthy') {
-      $healthy = $true
-      break
-    }
+    try {
+      $request = [System.Net.HttpWebRequest]::Create('http://127.0.0.1:8000/api/bootstrap-status')
+      $request.Timeout = 2000
+      $request.Proxy = $null
+      $response = $request.GetResponse()
+      $healthy = [int]$response.StatusCode -eq 200
+      $response.Close()
+      if ($healthy) { break }
+    } catch { }
     $state = & $docker inspect $containerName --format '{{.State.Status}}' 2>$null
     if ($LASTEXITCODE -eq 0 -and $state.Trim() -eq 'exited') { break }
-  }
-  if (-not $healthy) {
+  }  if (-not $healthy) {
     $tail = & $docker logs --tail 30 $containerName 2>&1
     throw "New app container failed its health check.`n$tail"
   }
